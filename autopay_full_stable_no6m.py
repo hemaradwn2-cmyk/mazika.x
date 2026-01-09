@@ -1,14 +1,40 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import os
+import json
+from datetime import datetime, timedelta
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    MessageHandler, ContextTypes, filters
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
 )
 from telegram.error import BadRequest
-import json, os
-from datetime import datetime, timedelta
+
+# ================= KEEP ALIVE (Replit 24/7) =================
+from flask import Flask
+from threading import Thread
+
+app_flask = Flask("keep_alive")
+
+@app_flask.route("/")
+def home():
+    return "Bot is alive!"
+
+def run_flask():
+    app_flask.run(host="0.0.0.0", port=8080)
+
+Thread(target=run_flask).start()
 
 # ================= CONFIG =================
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # ← هنا التعديل
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # مهم جدًا
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN not set")
 
 ADMINS = [8355975939]
 PRIVATE_CHANNEL_ID = -1003217329846
@@ -20,7 +46,7 @@ LTC_ADDRESS = "LSfYbm673DKTAm64eHPCMW7ir6RrZpTRxz"
 USERS_DB = "users.json"
 LOG_FILE = "payments.log"
 
-# ================= PLANS (بدون 6 شهور) =================
+# ================= PLANS =================
 PLANS = {
     "3d":   ("3 Days",    20,   3),
     "1w":   ("1 Week",    50,   7),
@@ -50,7 +76,9 @@ def add_user(uid, days):
     if days is None:
         users[str(uid)] = "lifetime"
     else:
-        users[str(uid)] = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+        users[str(uid)] = (
+            datetime.now() + timedelta(days=days)
+        ).strftime("%Y-%m-%d")
     save_users(users)
 
 # ================= START =================
@@ -106,7 +134,7 @@ async def payment_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
     plan = context.user_data["plan"]
     name, price, days = PLANS[plan]
 
-    proof = update.message.text if update.message.text else "📷 Screenshot"
+    proof = update.message.text or "📷 Screenshot"
 
     kb = InlineKeyboardMarkup([
         [
@@ -150,7 +178,7 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == "approve":
         plan = rest[0]
-        name, price, days = PLANS[plan]
+        name, _, days = PLANS[plan]
         add_user(uid, days)
 
         try:
@@ -160,7 +188,7 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await context.bot.send_message(
                 uid,
-                f"✅ *Payment Approved!*\n📦 {name}\nTap to join:",
+                f"✅ *Payment Approved!*\n📦 {name}",
                 reply_markup=InlineKeyboardMarkup(
                     [[InlineKeyboardButton("🔐 Join Channel", url=invite.invite_link)]]
                 ),
@@ -169,7 +197,7 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except BadRequest:
             await context.bot.send_message(
                 uid,
-                f"✅ Approved for *{name}*.\n⚠️ Contact admin to join channel.",
+                f"✅ Approved for *{name}*.\n⚠️ Contact admin.",
                 parse_mode="Markdown"
             )
 
@@ -181,7 +209,7 @@ async def admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         log(f"REJECTED user={uid}")
         await q.edit_message_text("❌ Rejected")
 
-# ================= EXPIRY CHECK =================
+# ================= EXPIRY =================
 async def expiry_job(context: ContextTypes.DEFAULT_TYPE):
     users = load_users()
     now = datetime.now()
@@ -208,8 +236,7 @@ app.add_handler(CallbackQueryHandler(plan_select, pattern="^plan_"))
 app.add_handler(CallbackQueryHandler(admin_action, pattern="^(approve|reject)"))
 app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, payment_proof))
 
-# Expiry يومي
 app.job_queue.run_repeating(expiry_job, interval=86400, first=60)
 
-print("Bot running (FULL STABLE NO 6M)...")
+print("Bot running 24/7 (FREE MODE)")
 app.run_polling()
